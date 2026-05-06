@@ -28,7 +28,6 @@ CONCEPTOS_PAGO = [
     "Otro"
 ]
 
-# NUEVA LISTA: Conceptos de Sanción (CS)
 CONCEPTOS_SANCION = [
     "N/A (No aplica)",
     "Extemporaneidad",
@@ -69,27 +68,40 @@ IMPUESTOS = [
 
 ARCHIVO_SALIDA = 'SOPORTE_GESTION_INTENSIVA.csv'
 
+# --- MANEJO DE ESTADO (Para mensajes persistentes) ---
+if 'mensaje_exito' not in st.session_state:
+    st.session_state['mensaje_exito'] = ""
+
+# Mostrar el mensaje de éxito si existe en la memoria
+if st.session_state['mensaje_exito']:
+    st.success(st.session_state['mensaje_exito'])
+    st.session_state['mensaje_exito'] = ""  # Se limpia después de mostrarlo
+
 # --- BARRA LATERAL: DESCARGA DE BASE DE DATOS EXCEL ---
 with st.sidebar:
     st.header("📥 Base de Datos")
     st.write("Descarga el consolidado de la gestión registrada.")
     
-    if os.path.exists(ARCHIVO_SALIDA):
-        df_descarga = pd.read_csv(ARCHIVO_SALIDA)
-        
-        # Convertir a Excel en memoria
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_descarga.to_excel(writer, index=False, sheet_name='Gestión Intensiva')
-        
-        st.download_button(
-            label="Descargar Base en Excel (.xlsx)",
-            data=buffer.getvalue(),
-            file_name=f"Base_Gestion_{datetime.now().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
-        st.success(f"Hay {len(df_descarga)} registros guardados.")
+    # Prevención de error: verifica si el archivo existe y no está vacío
+    if os.path.exists(ARCHIVO_SALIDA) and os.path.getsize(ARCHIVO_SALIDA) > 0:
+        try:
+            df_descarga = pd.read_csv(ARCHIVO_SALIDA)
+            
+            # Convertir a Excel en memoria para la descarga
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_descarga.to_excel(writer, index=False, sheet_name='Gestión Intensiva')
+            
+            st.download_button(
+                label="Descargar Base en Excel (.xlsx)",
+                data=buffer.getvalue(),
+                file_name=f"Base_Gestion_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
+            st.success(f"Hay {len(df_descarga)} registros guardados en la base de datos.")
+        except Exception as e:
+            st.error("Error leyendo la base de datos. Verifique el archivo CSV.")
     else:
         st.info("Aún no hay registros en la base de datos.")
 
@@ -97,7 +109,7 @@ with st.sidebar:
 st.title("📊 Registro de Gestión - Fiscalización Intensiva")
 st.markdown("Diligencie el formulario. El sistema asigna por defecto la **División 262**.")
 
-with st.form("registro_form"):
+with st.form("registro_form", clear_on_submit=False):
     st.header("1. Datos Básicos")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -107,7 +119,6 @@ with st.form("registro_form"):
     with col3:
         concepto_sistema = st.selectbox("Concepto y/o Sistema", options=SISTEMAS)
 
-    # Asignación automática de la dependencia
     st.text_input("Dependencia", value="262 - División Fiscalización y Liquidación Tributaria Intensiva", disabled=True)
     
     st.header("2. Datos del Contribuyente y Acto")
@@ -130,7 +141,6 @@ with st.form("registro_form"):
     with col8:
         ac = st.text_input("AC (Año Calendario/Acto)")
     with col9:
-        # Mejora: Ahora es un menú desplegable
         cs = st.selectbox("CS (Concepto Sanción)", options=CONCEPTOS_SANCION)
     with col10:
         periodo = st.text_input("Periodo (1-6)")
@@ -156,7 +166,7 @@ with st.form("registro_form"):
 
 # --- LÓGICA DE GUARDADO ---
 if submit_button:
-    if not cc_funcionario or not nit:
+    if not cc_funcionario.strip() or not nit.strip():
         st.warning("⚠️ Por favor, diligencie al menos la C.C. del Funcionario y el NIT del contribuyente.")
     else:
         total_gestion = v1 + v2 + v3 + v4 + v5 + v6
@@ -191,22 +201,28 @@ if submit_button:
         }
 
         try:
-            archivo_existe = os.path.isfile(ARCHIVO_SALIDA)
+            archivo_existe = os.path.exists(ARCHIVO_SALIDA) and os.path.getsize(ARCHIVO_SALIDA) > 0
+            
+            df_nuevo = pd.DataFrame([nuevo_registro])
             
             if archivo_existe:
                 df_existente = pd.read_csv(ARCHIVO_SALIDA)
-                nuevo_registro["No."] = len(df_existente) + 1
-                df_nuevo = pd.DataFrame([nuevo_registro])
-                df_nuevo.to_csv(ARCHIVO_SALIDA, mode='a', header=False, index=False, encoding='utf-8')
-            else:
-                nuevo_registro["No."] = 1
-                df_nuevo = pd.DataFrame([nuevo_registro])
+                df_nuevo["No."] = len(df_existente) + 1
+                # Reordenar para que No. quede de primero
                 cols = ["No."] + [col for col in df_nuevo.columns if col != "No."]
                 df_nuevo = df_nuevo[cols]
-                df_nuevo.to_csv(ARCHIVO_SALIDA, index=False, encoding='utf-8')
+                # Guardar en modo append (agregar al final) sin encabezados
+                df_nuevo.to_csv(ARCHIVO_SALIDA, mode='a', header=False, index=False, encoding='utf-8-sig')
+            else:
+                df_nuevo["No."] = 1
+                cols = ["No."] + [col for col in df_nuevo.columns if col != "No."]
+                df_nuevo = df_nuevo[cols]
+                # Guardar nuevo archivo con encabezados
+                df_nuevo.to_csv(ARCHIVO_SALIDA, index=False, encoding='utf-8-sig')
 
-            st.success(f"✅ ¡Gestión registrada! Total: **${total_gestion:,.2f}**")
-            st.rerun() 
+            # Almacenar el mensaje de éxito y recargar la página para limpiar los campos
+            st.session_state['mensaje_exito'] = f"✅ ¡Gestión registrada! Total: ${total_gestion:,.2f}"
+            st.rerun()
             
         except Exception as e:
-            st.error(f"❌ Error al guardar: {e}")
+            st.error(f"❌ Error interno al guardar los datos: {str(e)}")
