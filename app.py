@@ -8,15 +8,36 @@ from datetime import datetime
 st.set_page_config(page_title="Gestión Fiscalización Intensiva", layout="wide")
 
 # --- LISTAS DE DATOS ---
+SISTEMAS = ["Gestor", "Integra", "Otro"]
+
 TIPOS_ACTOS = [
     "Declaración de Renta",
     "Declaración de IVA",
     "Declaración de Retención en la Fuente",
     "Formulario de Pago (490)",
     "Requerimiento Especial",
-    "Pliego de Cargos",
     "Liquidación Oficial",
-    "Resolución Sanción",
+    "Otro"
+]
+
+CONCEPTOS_PAGO = [
+    "71 - Impuesto",
+    "72 - Sanción",
+    "73 - Intereses de Mora",
+    "74 - Anticipo",
+    "Otro"
+]
+
+# NUEVA LISTA: Conceptos de Sanción (CS)
+CONCEPTOS_SANCION = [
+    "N/A (No aplica)",
+    "Extemporaneidad",
+    "Inexactitud",
+    "Corrección",
+    "No declarar",
+    "No enviar información / Medios Magnéticos",
+    "Facturación",
+    "Omisión de activos / Pasivos inexistentes",
     "Otro"
 ]
 
@@ -56,7 +77,7 @@ with st.sidebar:
     if os.path.exists(ARCHIVO_SALIDA):
         df_descarga = pd.read_csv(ARCHIVO_SALIDA)
         
-        # Convertir el DataFrame de pandas a un archivo Excel en memoria
+        # Convertir a Excel en memoria
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_descarga.to_excel(writer, index=False, sheet_name='Gestión Intensiva')
@@ -84,10 +105,10 @@ with st.form("registro_form"):
     with col2:
         nombre_funcionario = st.text_input("Nombre del Funcionario")
     with col3:
-        concepto_sistema = st.text_input("Concepto y/o Sistema (Ej. Gestor, Integra)")
+        concepto_sistema = st.selectbox("Concepto y/o Sistema", options=SISTEMAS)
 
     # Asignación automática de la dependencia
-    dependencia = st.text_input("Dependencia", value="262 - División Fiscalización y Liquidación Tributaria Intensiva", disabled=True)
+    st.text_input("Dependencia", value="262 - División Fiscalización y Liquidación Tributaria Intensiva", disabled=True)
     
     st.header("2. Datos del Contribuyente y Acto")
     col4, col5 = st.columns(2)
@@ -103,13 +124,14 @@ with st.form("registro_form"):
     st.header("3. Parámetros Tributarios")
     col6, col7, col8, col9, col10 = st.columns(5)
     with col6:
-        cp = st.text_input("CP (Concepto de Pago)")
+        cp = st.selectbox("CP (Concepto de Pago)", options=CONCEPTOS_PAGO)
     with col7:
         ag = st.text_input("AG (Año Gravable)")
     with col8:
         ac = st.text_input("AC (Año Calendario/Acto)")
     with col9:
-        cs = st.text_input("CS (Concepto Sanción)")
+        # Mejora: Ahora es un menú desplegable
+        cs = st.selectbox("CS (Concepto Sanción)", options=CONCEPTOS_SANCION)
     with col10:
         periodo = st.text_input("Periodo (1-6)")
         
@@ -141,11 +163,11 @@ if submit_button:
         
         nuevo_registro = {
             "Fecha del Reporte": datetime.now().strftime("%Y-%m-%d"),
-            "Concepto y/o Sistema ": concepto_sistema,
-            " Cod. Dependencia": "262", # Solo guarda el código
+            "Concepto y/o Sistema": concepto_sistema,
+            " Cod. Dependencia": "262",
             "NIT": nit,
             "Nombre o Razón Social": razon_social,
-            "Tipo de Acto": tipo_acto, # Columna nueva integrada
+            "Tipo de Acto": tipo_acto,
             "Fecha del Acto ": fecha_acto.strftime("%Y-%m-%d"),
             "No. del Acto": no_acto,
             "CP": cp,
@@ -183,9 +205,8 @@ if submit_button:
                 df_nuevo = df_nuevo[cols]
                 df_nuevo.to_csv(ARCHIVO_SALIDA, index=False, encoding='utf-8')
 
-            st.success(f"✅ ¡Gestión registrada exitosamente! Total: **${total_gestion:,.2f}**")
-            # Truco para actualizar la barra lateral sin recargar toda la página
+            st.success(f"✅ ¡Gestión registrada! Total: **${total_gestion:,.2f}**")
             st.rerun() 
             
         except Exception as e:
-            st.error(f"❌ Ocurrió un error al guardar: {e}")
+            st.error(f"❌ Error al guardar: {e}")
