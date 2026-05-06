@@ -1,20 +1,24 @@
 import streamlit as st
 import pandas as pd
 import os
+import io
 from datetime import datetime
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión Fiscalización Intensiva", layout="wide")
 
 # --- LISTAS DE DATOS ---
-DEPENDENCIAS_INTENSIVA = {
-    "200": "Subdirección Operativa de Fiscalización y Liquidación",
-    "262": "División Fiscalización y Liquidación Tributaria Intensiva",
-    "263": "División Fiscalización y Liquidación Tributaria Intensiva para PN y asimiladas, y residual",
-    "264": "División Fiscalización y Liquidación Tributaria Intensiva para PJ y asimiladas",
-    "270": "División Fiscalización y Liquidación Tributaria, Aduanera y Cambiaria",
-    "271": "División Fiscalización y Liquidación Tributaria"
-}
+TIPOS_ACTOS = [
+    "Declaración de Renta",
+    "Declaración de IVA",
+    "Declaración de Retención en la Fuente",
+    "Formulario de Pago (490)",
+    "Requerimiento Especial",
+    "Pliego de Cargos",
+    "Liquidación Oficial",
+    "Resolución Sanción",
+    "Otro"
+]
 
 CONCEPTOS_GESTION = [
     "Correcciones- contingencias Gestor", "Declaraciones presentadas-contingencias Gestor",
@@ -44,9 +48,33 @@ IMPUESTOS = [
 
 ARCHIVO_SALIDA = 'SOPORTE_GESTION_INTENSIVA.csv'
 
-# --- INTERFAZ GRÁFICA ---
+# --- BARRA LATERAL: DESCARGA DE BASE DE DATOS EXCEL ---
+with st.sidebar:
+    st.header("📥 Base de Datos")
+    st.write("Descarga el consolidado de la gestión registrada.")
+    
+    if os.path.exists(ARCHIVO_SALIDA):
+        df_descarga = pd.read_csv(ARCHIVO_SALIDA)
+        
+        # Convertir el DataFrame de pandas a un archivo Excel en memoria
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_descarga.to_excel(writer, index=False, sheet_name='Gestión Intensiva')
+        
+        st.download_button(
+            label="Descargar Base en Excel (.xlsx)",
+            data=buffer.getvalue(),
+            file_name=f"Base_Gestion_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
+        st.success(f"Hay {len(df_descarga)} registros guardados.")
+    else:
+        st.info("Aún no hay registros en la base de datos.")
+
+# --- INTERFAZ GRÁFICA PRINCIPAL ---
 st.title("📊 Registro de Gestión - Fiscalización Intensiva")
-st.markdown("Diligencie el siguiente formulario para registrar oficialmente la gestión. El sistema calculará automáticamente los totales y evitará que se crucen datos con Extensiva.")
+st.markdown("Diligencie el formulario. El sistema asigna por defecto la **División 262**.")
 
 with st.form("registro_form"):
     st.header("1. Datos Básicos")
@@ -58,31 +86,30 @@ with st.form("registro_form"):
     with col3:
         concepto_sistema = st.text_input("Concepto y/o Sistema (Ej. Gestor, Integra)")
 
-    dependencia = st.selectbox(
-        "Dependencia (Filtrado Automático Intensiva)", 
-        options=[f"{cod} - {nom}" for cod, nom in DEPENDENCIAS_INTENSIVA.items()]
-    )
+    # Asignación automática de la dependencia
+    dependencia = st.text_input("Dependencia", value="262 - División Fiscalización y Liquidación Tributaria Intensiva", disabled=True)
     
     st.header("2. Datos del Contribuyente y Acto")
     col4, col5 = st.columns(2)
     with col4:
         nit = st.text_input("NIT del contribuyente")
+        razon_social = st.text_input("Nombre o Razón Social")
+    
+    with col5:
+        tipo_acto = st.selectbox("Tipo de Acto", options=TIPOS_ACTOS)
         fecha_acto = st.date_input("Fecha del Acto")
         no_acto = st.text_input("No. del Acto")
-    with col5:
-        razon_social = st.text_input("Nombre o Razón Social")
-        codigo_acto = st.text_input("Código de Acto (Ej. 501, 503...)")
         
     st.header("3. Parámetros Tributarios")
     col6, col7, col8, col9, col10 = st.columns(5)
     with col6:
-        cp = st.text_input("CP")
+        cp = st.text_input("CP (Concepto de Pago)")
     with col7:
         ag = st.text_input("AG (Año Gravable)")
     with col8:
-        ac = st.text_input("AC")
+        ac = st.text_input("AC (Año Calendario/Acto)")
     with col9:
-        cs = st.text_input("CS")
+        cs = st.text_input("CS (Concepto Sanción)")
     with col10:
         periodo = st.text_input("Periodo (1-6)")
         
@@ -91,8 +118,6 @@ with st.form("registro_form"):
     concepto_gestion = st.selectbox("Concepto de Gestión", options=CONCEPTOS_GESTION)
 
     st.header("4. Valores de Gestión Recuperada")
-    st.info("💡 Ingrese los valores numéricos. El sistema calculará el total automáticamente al guardar.")
-    
     col11, col12 = st.columns(2)
     with col11:
         v1 = st.number_input("1. Mayor valor a pagar (impuesto + sanciones)", min_value=0.0, format="%.2f", step=1000.0)
@@ -105,12 +130,10 @@ with st.form("registro_form"):
     
     observaciones = st.text_area("Observaciones adicionales (Opcional)")
 
-    # Botón de guardado
     submit_button = st.form_submit_button(label="💾 Guardar Registro de Gestión")
 
 # --- LÓGICA DE GUARDADO ---
 if submit_button:
-    # Si falta el NIT o la CC, podemos mandar una advertencia (opcional, pero útil)
     if not cc_funcionario or not nit:
         st.warning("⚠️ Por favor, diligencie al menos la C.C. del Funcionario y el NIT del contribuyente.")
     else:
@@ -119,11 +142,11 @@ if submit_button:
         nuevo_registro = {
             "Fecha del Reporte": datetime.now().strftime("%Y-%m-%d"),
             "Concepto y/o Sistema ": concepto_sistema,
-            " Cod. Dependencia": dependencia.split(" - ")[0],
+            " Cod. Dependencia": "262", # Solo guarda el código
             "NIT": nit,
             "Nombre o Razón Social": razon_social,
+            "Tipo de Acto": tipo_acto, # Columna nueva integrada
             "Fecha del Acto ": fecha_acto.strftime("%Y-%m-%d"),
-            "Código de Acto": codigo_acto,
             "No. del Acto": no_acto,
             "CP": cp,
             "AG": ag,
@@ -152,17 +175,17 @@ if submit_button:
                 df_existente = pd.read_csv(ARCHIVO_SALIDA)
                 nuevo_registro["No."] = len(df_existente) + 1
                 df_nuevo = pd.DataFrame([nuevo_registro])
-                # Añadir fila sin reescribir encabezados
                 df_nuevo.to_csv(ARCHIVO_SALIDA, mode='a', header=False, index=False, encoding='utf-8')
             else:
                 nuevo_registro["No."] = 1
                 df_nuevo = pd.DataFrame([nuevo_registro])
-                # Reorganizar columnas para que "No." sea la primera
                 cols = ["No."] + [col for col in df_nuevo.columns if col != "No."]
                 df_nuevo = df_nuevo[cols]
-                # Crear archivo con encabezados
                 df_nuevo.to_csv(ARCHIVO_SALIDA, index=False, encoding='utf-8')
 
-            st.success(f"✅ ¡Gestión registrada exitosamente! El total calculado fue de: **${total_gestion:,.2f}**")
+            st.success(f"✅ ¡Gestión registrada exitosamente! Total: **${total_gestion:,.2f}**")
+            # Truco para actualizar la barra lateral sin recargar toda la página
+            st.rerun() 
+            
         except Exception as e:
-            st.error(f"❌ Ocurrió un error al intentar guardar el archivo: {e}")
+            st.error(f"❌ Ocurrió un error al guardar: {e}")
